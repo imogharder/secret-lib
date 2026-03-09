@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── HELPERS ──────────────────────────────────────────────
+    function isSignedIn()  { return request.auth != null; }
+    function isAdmin()     { return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'; }
+    function isMember()    { return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['member', 'admin']; }
+    function isOwner(uid)  { return request.auth.uid == uid; }
+
+    // ── USERS ─────────────────────────────────────────────────
+    match /users/{uid} {
+      // Read own profile OR admin reads any
+      allow read:   if isOwner(uid) || isAdmin();
+      // Create own profile on sign-up (pending role enforced by app)
+      allow create: if isOwner(uid) && request.resource.data.role == 'pending';
+      // Update: admin updates anyone, user updates only their own non-role fields
+      allow update: if isAdmin() || (isOwner(uid) && !('role' in request.resource.data.diff(resource.data).affectedKeys()));
+      // Delete: admin only
+      allow delete: if isAdmin();
+    }
+
+    // ── NICHES ────────────────────────────────────────────────
+    match /niches/{nicheId} {
+      allow read:   if isMember();
+      allow write:  if isAdmin();
+    }
+
+    // ── CATEGORIES ───────────────────────────────────────────
+    match /categories/{categoryId} {
+      allow read:   if isMember();
+      allow write:  if isAdmin();
+    }
+
+    // ── ENTRIES ──────────────────────────────────────────────
+    match /entries/{entryId} {
+      allow read:   if isMember();
+      // Members can create entries
+      allow create: if isMember();
+      // Owner or admin can update
+      allow update: if isAdmin() || (isMember() && isOwner(resource.data.authorId));
+      // Only admin can delete
+      allow delete: if isAdmin();
+    }
+
+    // ── TAGS ─────────────────────────────────────────────────
+    match /tags/{tagId} {
+      allow read:   if isMember();
+      allow write:  if isAdmin();
+    }
+  }
+}
